@@ -6,7 +6,6 @@ import android.os.Bundle
 import android.os.Process
 import android.util.Log
 import android.view.GestureDetector
-import android.view.HapticFeedbackConstants
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -18,6 +17,7 @@ import org.libsdl.app.SDLActivity
 import org.libsdl.app.SDLSurface
 import java.io.File
 import java.io.IOException
+import kotlin.math.min
 
 /**
  * Boots MAME straight into atetris.
@@ -28,24 +28,44 @@ import java.io.IOException
  *
  * Tapping the game cycles bgfx CRT chains live through a hook in our MAME build
  * (chain_manager::request_chain); the choice persists and seeds -bgfx_screen_chains.
+ * Long-pressing it toggles between the stretched image and true 4:3; both persist.
  */
 class MameActivity : SDLActivity() {
 
     private var controlPad: ControlPadView? = null
     private var shaderToast: ShaderToastView? = null
     private var shader = CrtShader.entries.first()
+    private var stretch = true
+
+    /**
+     * Shared by the game surface and the letterbox bars around it (touches the surface leaves to
+     * the root layout). A gesture never spans both views, so their coordinate spaces don't mix.
+     */
+    private val gestures by lazy {
+        GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent) = true
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                cycleShader()
+                return true
+            }
+            override fun onLongPress(e: MotionEvent) = toggleStretch()
+        })
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Must complete before SDLActivity spawns the native thread that calls getArguments().
         installAssets()
-        val saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_SHADER, null)
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val saved = prefs.getString(KEY_SHADER, null)
         shader = CrtShader.entries.firstOrNull { it.chain == saved } ?: shader
+        stretch = prefs.getBoolean(KEY_STRETCH, true)
         super.onCreate(savedInstanceState)
         installControlPad()
         installShaderToast()
     }
 
     /** Docks the control pad at the bottom of SDL's RelativeLayout and shrinks the surface above it. */
+    @SuppressLint("ClickableViewAccessibility")
     private fun installControlPad() {
         // SDLActivity bails out of onCreate (error dialog, no layout) when native libs fail to load.
         val layout = SDLActivity.mLayout as? RelativeLayout ?: return
@@ -56,13 +76,42 @@ class MameActivity : SDLActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { addRule(RelativeLayout.ALIGN_PARENT_BOTTOM) })
 
-        surface.layoutParams = RelativeLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
-        ).apply {
-            addRule(RelativeLayout.ALIGN_PARENT_TOP)
-            addRule(RelativeLayout.ABOVE, pad.id)
-        }
         controlPad = pad
+        layoutSurface()
+        // The pad's height depends on the window size and insets only, never on the aspect mode.
+        pad.addOnLayoutChangeListener { _, _, top, right, _, _, oldTop, oldRight, _ ->
+            if (top != oldTop || right != oldRight) pad.post { layoutSurface() }
+        }
+        layout.setOnTouchListener { _, event -> gestures.onTouchEvent(event) }
+    }
+
+    /**
+     * Stretched: the surface fills everything above the pad. 4:3: the largest 4:3 box in that
+     * area, centered, over black bars. MAME runs -nokeepaspect, so it always fills the surface.
+     */
+    private fun layoutSurface() {
+        val layout = SDLActivity.mLayout as? RelativeLayout ?: return
+        val surface = SDLActivity.mSurface ?: return
+        val pad = controlPad ?: return
+        val params = if (stretch || layout.width == 0 || pad.top <= 0) {
+            RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                .apply { addRule(RelativeLayout.ABOVE, pad.id) }
+        } else {
+            val availW = layout.width
+            val availH = pad.top
+            val h = min(availH, availW * 3 / 4)
+            val w = min(availW, h * 4 / 3)
+            RelativeLayout.LayoutParams(w, h).apply {
+                addRule(RelativeLayout.CENTER_HORIZONTAL)
+                topMargin = (availH - h) / 2
+            }
+        }
+        params.addRule(RelativeLayout.ALIGN_PARENT_TOP)
+        val old = surface.layoutParams as? RelativeLayout.LayoutParams
+        if (old != null && old.width == params.width && old.height == params.height &&
+            old.topMargin == params.topMargin && old.rules.contentEquals(params.rules)
+        ) return
+        surface.layoutParams = params
     }
 
     /** Overlays the plaque that names the active shader, centered at the top of the game. */
@@ -85,22 +134,13 @@ class MameActivity : SDLActivity() {
 
     /**
      * SDL re-registers the surface as its own touch listener on every resume, so tap handling
-     * lives in an onTouch override. atetris takes no touch input: a tap cycles the CRT shader.
+     * lives in an onTouch override. atetris takes no touch input: a tap cycles the CRT shader and a
+     * long press toggles the aspect.
      */
     private inner class GameSurface(context: Context) : SDLSurface(context) {
-        private val taps = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent) = true
-            override fun onSingleTapUp(e: MotionEvent): Boolean {
-                performClick()
-                performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                cycleShader()
-                return true
-            }
-        })
-
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouch(v: View, event: MotionEvent): Boolean {
-            taps.onTouchEvent(event)
+            gestures.onTouchEvent(event)
             return true
         }
     }
@@ -118,6 +158,17 @@ class MameActivity : SDLActivity() {
             }
         }
         showShader()
+    }
+
+    private fun toggleStretch() {
+        stretch = !stretch
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit { putBoolean(KEY_STRETCH, stretch) }
+        layoutSurface()
+        if (stretch) {
+            shaderToast?.show("STRETCHED", "FILLS THE SCREEN · HOLD FOR TRUE 4:3")
+        } else {
+            shaderToast?.show("ASPECT 4:3", "ORIGINAL PROPORTIONS · HOLD TO STRETCH")
+        }
     }
 
     private fun showShader() {
@@ -147,7 +198,7 @@ class MameActivity : SDLActivity() {
         "-bgfx_backend", "gles", // only ESSL shaders are shipped
         "-bgfx_screen_chains", shader.chain,
         "-skip_gameinfo",
-        "-nokeepaspect", // fill the surface; ControlPadView sizes it to a mildly stretched 4:3
+        "-nokeepaspect", // fill the surface; layoutSurface() decides stretched or true 4:3
     )
 
     /**
@@ -208,6 +259,7 @@ class MameActivity : SDLActivity() {
         const val TAG = "QuickTetris"
         const val PREFS = "display"
         const val KEY_SHADER = "bgfx_chain"
+        const val KEY_STRETCH = "stretch"
         const val TOAST_MARGIN_DP = 12f
 
         /** Implemented in our MAME build (bgfx chainmanager.cpp); thread-safe. */

@@ -13,7 +13,6 @@ import android.os.SystemClock
 import android.util.SparseArray
 import android.util.SparseIntArray
 import android.util.SparseLongArray
-import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -83,7 +82,6 @@ class ControlPadView(context: Context) : View(context) {
     init {
         setBackgroundColor(ArcadeArt.COLOR_CABINET)
         isFocusable = false
-        isHapticFeedbackEnabled = true
     }
 
     /**
@@ -249,9 +247,7 @@ class ControlPadView(context: Context) : View(context) {
     }
 
     private fun press(c: Control) {
-        if (pressCount[c.ordinal]++ == 0) {
-            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-        }
+        pressCount[c.ordinal]++
         val holds = keyHolds.get(c.keyCode)
         keyHolds.put(c.keyCode, holds + 1)
         if (holds > 0) return
