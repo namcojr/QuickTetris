@@ -1,0 +1,33 @@
+# IDE
+*.iml
+.idea/
+
+# Gradle / Kotlin / NDK build output
+.gradle/
+build/
+.kotlin/
+.cxx/
+.externalNativeBuild/
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+
+# Native build artifacts (rebuild with native/build-libmain.sh)
+app/src/main/jniLibs/
+*.so
+*.o
+*.a
+
+# Local config
+local.properties
+
+# Signing secrets
+*.jks
+*.keystore
+keystore.properties
+
+# ROMs are copyrighted; supply locally
+/roms/

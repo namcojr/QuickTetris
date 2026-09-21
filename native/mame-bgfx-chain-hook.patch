@@ -1,0 +1,143 @@
+diff --git a/src/osd/modules/render/bgfx/chainmanager.cpp b/src/osd/modules/render/bgfx/chainmanager.cpp
+index 5313f8c892d..9ad2cd3c462 100644
+--- a/src/osd/modules/render/bgfx/chainmanager.cpp
++++ b/src/osd/modules/render/bgfx/chainmanager.cpp
+@@ -38,6 +38,13 @@
+ #include "util/unicode.h"
+ #include "util/xmlfile.h"
+ 
++#include <atomic>
++#include <mutex>
++
++#if defined(__ANDROID__)
++#include <jni.h>
++#endif
++
+ #include "osdcore.h"
+ #include "osdfile.h"
+ 
+@@ -478,6 +485,54 @@ void chain_manager::set_current_chain(uint32_t screen, int32_t chain_index)
+ 	}
+ }
+ 
++namespace {
++
++std::mutex s_request_mutex;
++std::string s_requested_chain;
++std::atomic<uint32_t> s_request_serial(0);
++
++} // anonymous namespace
++
++void chain_manager::request_chain(std::string_view name)
++{
++	std::lock_guard<std::mutex> lock(s_request_mutex);
++	s_requested_chain.assign(name);
++	s_request_serial.fetch_add(1, std::memory_order_release);
++}
++
++void chain_manager::apply_requested_chain()
++{
++	// Screens are counted on the first frame; keep the request pending until then.
++	uint32_t const serial = s_request_serial.load(std::memory_order_acquire);
++	if (serial == m_applied_request || m_screen_count == 0)
++		return;
++	m_applied_request = serial;
++
++	std::string name;
++	{
++		std::lock_guard<std::mutex> lock(s_request_mutex);
++		name = s_requested_chain;
++	}
++
++	auto const found = std::find_if(
++			m_available_chains.begin(),
++			m_available_chains.end(),
++			[&name] (auto const &avail) { return avail.m_name == name; });
++	if (m_available_chains.end() == found)
++	{
++		osd_printf_warning("BGFX: Requested chain %s not found\n", name);
++		return;
++	}
++
++	// Same path as the UI's per-screen effect slider: reload chains, keep other screens' sliders.
++	int32_t const chainnum = found - m_available_chains.begin();
++	for (uint32_t screen = 0; screen < m_screen_count && screen < m_current_chain.size(); screen++)
++	{
++		if (m_current_chain[screen] != chainnum)
++			slider_changed(screen, nullptr, chainnum);
++	}
++}
++
+ int32_t chain_manager::slider_changed(int id, std::string *str, int32_t newval)
+ {
+ 	if (newval != SLIDER_NOCHANGE)
+@@ -525,6 +580,8 @@ void chain_manager::create_selection_slider(uint32_t screen_index)
+ 
+ uint32_t chain_manager::update_screen_textures(uint32_t view, render_primitive *starting_prim, osd_window& window)
+ {
++	apply_requested_chain();
++
+ 	if (!count_screens(starting_prim))
+ 		return 0;
+ 
+@@ -957,3 +1014,15 @@ std::vector<ui::menu_item> chain_manager::get_slider_list()
+ 
+ 	return sliders;
+ }
++
++#if defined(__ANDROID__)
++// Host app hook: com.namco.quicktetris.MameActivity.nativeSetScreenChain(String).
++extern "C" JNIEXPORT void JNICALL Java_com_namco_quicktetris_MameActivity_nativeSetScreenChain(JNIEnv *env, jclass, jstring name)
++{
++	char const *const utf = name ? env->GetStringUTFChars(name, nullptr) : nullptr;
++	if (!utf)
++		return;
++	chain_manager::request_chain(utf);
++	env->ReleaseStringUTFChars(name, utf);
++}
++#endif
+diff --git a/src/osd/modules/render/bgfx/chainmanager.h b/src/osd/modules/render/bgfx/chainmanager.h
+index 0d489d0bd72..c469d1ed82f 100644
+--- a/src/osd/modules/render/bgfx/chainmanager.h
++++ b/src/osd/modules/render/bgfx/chainmanager.h
+@@ -66,6 +66,9 @@ public:
+ 	uint32_t update_screen_textures(uint32_t view, render_primitive *starting_prim, osd_window& window);
+ 	uint32_t process_screen_chains(uint32_t view, osd_window& window);
+ 
++	// Thread-safe: selects chain `name` on every screen of every window at the next frame.
++	static void request_chain(std::string_view name);
++
+ 	// Getters
+ 	running_machine& machine() const { return m_machine; }
+ 	const osd_options& options() const { return m_options; }
+@@ -109,6 +112,7 @@ private:
+ 	void load_chains();
+ 	void destroy_chains();
+ 	void reload_chains();
++	void apply_requested_chain();
+ 
+ 	void init_texture_converters();
+ 
+@@ -139,6 +143,7 @@ private:
+ 	uint16_t                    m_max_prescale_size;
+ 	slider_dirty_notifier&      m_slider_notifier;
+ 	uint32_t                    m_screen_count;
++	uint32_t                    m_applied_request = 0;
+ 	int32_t                     m_default_chain_index;
+ 	std::vector<chain_desc>     m_available_chains;
+ 	std::vector<bgfx_chain*>    m_screen_chains;
+diff --git a/src/osd/modules/render/bgfx/shadermanager.cpp b/src/osd/modules/render/bgfx/shadermanager.cpp
+index 282029cb96a..9846e9e3c6d 100644
+--- a/src/osd/modules/render/bgfx/shadermanager.cpp
++++ b/src/osd/modules/render/bgfx/shadermanager.cpp
+@@ -84,8 +84,8 @@ std::string shader_manager::make_path_string(const osd_options &options, const s
+ 	std::string shader_path(options.bgfx_path());
+ 	shader_path += PATH_SEPARATOR "shaders" PATH_SEPARATOR;
+ 
+-#if defined(SDLMAME_EMSCRIPTEN)
+-	// Hard-code renderer type to OpenGL ES for emscripten builds since the
++#if defined(SDLMAME_EMSCRIPTEN) || defined(__ANDROID__)
++	// Hard-code renderer type to OpenGL ES for emscripten and Android builds since the
+ 	// bgfx::getRendererType() is called here before BGFX has been
+ 	// initialized and therefore gives the wrong renderer type (Noop).
+ 	shader_path += "essl" PATH_SEPARATOR;
