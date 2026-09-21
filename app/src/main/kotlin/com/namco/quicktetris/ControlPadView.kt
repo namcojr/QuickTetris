@@ -26,19 +26,30 @@ import kotlin.math.min
  * Multi-touch arcade control panel injecting Android keycodes into SDL, which MAME reads as its
  * default keyboard bindings:
  *
- *        COIN            START
+ *        COIN    reset   START
  *   LEFT      RIGHT   DROP    ROTATE
  *
  * A single view owns every pointer so a finger can slide between buttons (LEFT <-> RIGHT) without
  * lifting. Keys are refcounted, so START and ROTATE (both BUTTON1 on atetris) never release each
- * other.
+ * other. The tiny RESET only arms on a fresh touch, so sliding COIN <-> START can't hit it.
  *
  * Rendering: a full-bleed screwed-on plate (see [ArcadeArt]) running under the navigation bar;
  * buttons stay inside the inset-free area.
  */
 class ControlPadView(context: Context) : View(context) {
 
-    private enum class Control(val label: String, val keyCode: Int, val color: Int, val icon: Icon) {
+    private enum class Control(
+        val label: String,
+        val keyCode: Int,
+        val color: Int,
+        val icon: Icon,
+        /** Held around [keyCode]: pressed before it, released after it. */
+        val modifier: Int = 0,
+    ) {
+        // First, so its hit area wins over the COIN/START halves it sits between.
+        // MAME UI_RESET_MACHINE = Shift+F3: a hard reset re-inits the OSD, rebuilding a renderer
+        // left black after the app is restored.
+        RESET("RESET", KeyEvent.KEYCODE_F3, Color.rgb(0x5A, 0x5A, 0x62), Icon.NONE, KeyEvent.KEYCODE_SHIFT_LEFT),
         // MAME COIN1 = KEYCODE_5.
         COIN("COIN", KeyEvent.KEYCODE_5, Color.rgb(0xEC, 0xEC, 0xE6), Icon.NONE),
         // atetris has no START input: the cabinet wires START and ROTATE to the same bit (BUTTON1).
@@ -54,6 +65,7 @@ class ControlPadView(context: Context) : View(context) {
     private val centerX = FloatArray(controls.size)
     private val centerY = FloatArray(controls.size)
     private val labelY = FloatArray(controls.size)
+    private val labelSize = FloatArray(controls.size)
     private val skins = arrayOfNulls<ArcadeArt.ButtonSkin>(controls.size)
     private val pressCount = IntArray(controls.size)
     private val pointerTargets = SparseArray<Control>()
@@ -135,6 +147,7 @@ class ControlPadView(context: Context) : View(context) {
         val pad = PLATE_PAD_DP * d
         val colW = rect.width() / 4
         label.textSize = min(LABEL_DP * d, colW * 0.15f)
+        labelSize.fill(label.textSize)
         val fm = label.fontMetrics
         val labelGap = LABEL_GAP_DP * d
         val labelH = labelGap + fm.descent - fm.ascent
@@ -163,6 +176,22 @@ class ControlPadView(context: Context) : View(context) {
         place(Control.START, colW * 3, smallCy, smallR, labelGap - fm.ascent)
         hitRects[Control.COIN.ordinal].set(0f, 0f, w / 2f, splitY)
         hitRects[Control.START.ordinal].set(w / 2f, 0f, w.toFloat(), splitY)
+
+        // RESET: tiny, centered between them and dropped a little, kept clear of the stripes.
+        val resetR = smallR * RESET_SCALE
+        val resetText = label.textSize * RESET_SCALE_LABEL
+        val resetLabel = (labelGap - fm.ascent) * RESET_SCALE_LABEL
+        val resetBottom = splitY - stripeHalf - pad * 0.25f
+        val resetCy = min(smallCy + smallR * RESET_DROP, resetBottom - resetLabel - fm.descent * RESET_SCALE_LABEL)
+        if (resetR * ArcadeArt.BEZEL_SCALE <= resetCy - smallTop) {
+            place(Control.RESET, w / 2f, resetCy, resetR, resetLabel)
+            labelSize[Control.RESET.ordinal] = resetText
+            val half = max(resetR * ArcadeArt.BEZEL_SCALE, RESET_MIN_HIT_DP * d / 2)
+            hitRects[Control.RESET.ordinal].set(
+                w / 2f - half, resetCy - half, w / 2f + half,
+                max(resetCy + half, labelY[Control.RESET.ordinal] + fm.descent * RESET_SCALE_LABEL),
+            )
+        }
 
         plate = ArcadeArt.PlateSkin(rect, 0f)
         screw = ArcadeArt.ScrewSkin(SCREW_DP * d)
@@ -207,6 +236,7 @@ class ControlPadView(context: Context) : View(context) {
     private fun drawLabel(canvas: Canvas, c: Control) {
         val x = centerX[c.ordinal]
         val y = labelY[c.ordinal]
+        label.textSize = labelSize[c.ordinal]
         label.color = ArcadeArt.COLOR_SHADOW
         canvas.drawText(c.label, x, y + density, label)
         label.color = ArcadeArt.COLOR_LEGEND
@@ -221,7 +251,11 @@ class ControlPadView(context: Context) : View(context) {
                 retarget(event.getPointerId(i), hitTest(event.getX(i), event.getY(i)))
             }
             MotionEvent.ACTION_MOVE -> for (i in 0 until event.pointerCount) {
-                retarget(event.getPointerId(i), hitTest(event.getX(i), event.getY(i)))
+                val id = event.getPointerId(i)
+                val target = hitTest(event.getX(i), event.getY(i))
+                // Sliding onto RESET keeps the current button instead of resetting the machine.
+                val current = pointerTargets.get(id)
+                retarget(id, if (target == Control.RESET && current != Control.RESET) current else target)
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP ->
                 retarget(event.getPointerId(event.actionIndex), null)
@@ -312,10 +346,22 @@ class ControlPadView(context: Context) : View(context) {
 
     private fun sendKey(keyCode: Int, down: Boolean) {
         if (SDLActivity.mBrokenLibraries) return
-        if (down) SDLActivity.onNativeKeyDown(keyCode) else SDLActivity.onNativeKeyUp(keyCode)
+        val modifier = MODIFIERS.get(keyCode)
+        if (down) {
+            if (modifier != 0) SDLActivity.onNativeKeyDown(modifier)
+            SDLActivity.onNativeKeyDown(keyCode)
+        } else {
+            SDLActivity.onNativeKeyUp(keyCode)
+            if (modifier != 0) SDLActivity.onNativeKeyUp(modifier)
+        }
     }
 
     private companion object {
+        /** keyCode -> modifier; keyCodes carrying a modifier must be unique to one control. */
+        val MODIFIERS = SparseIntArray().apply {
+            Control.entries.filter { it.modifier != 0 }.forEach { put(it.keyCode, it.modifier) }
+        }
+
         const val MIN_PANEL_FRACTION = 0.3f
         const val MIN_HOLD_MS = 50L // 3 frames at 60 Hz
 
@@ -335,5 +381,9 @@ class ControlPadView(context: Context) : View(context) {
         const val LABEL_GAP_DP = 6f
         const val MAX_BIG_DP = 58f
         const val SMALL_SCALE = 0.6f
+        const val RESET_SCALE = 0.32f // of the COIN/START radius
+        const val RESET_SCALE_LABEL = 0.6f
+        const val RESET_DROP = 0.45f // center offset below COIN/START, in their radii
+        const val RESET_MIN_HIT_DP = 36f
     }
 }
