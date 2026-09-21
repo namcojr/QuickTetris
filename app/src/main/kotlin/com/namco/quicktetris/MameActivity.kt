@@ -250,9 +250,10 @@ class MameActivity : SDLActivity() {
     /** bgfx chains offered by the tap cycle, in order; [chain] names bgfx/chains/<chain>.json. */
     private enum class CrtShader(val chain: String, val title: String, val blurb: String) {
         CRT_GEOM("crt-geom", "CRT-GEOM", "CURVED TUBE · SCANLINES · SHADOW MASK"),
-        CRT_GEOM_DELUXE("crt-geom-deluxe", "CRT-GEOM DELUXE", "HALATION · BLOOM · PHOSPHOR GLOW"),
+        SCANLINES("scanlines", "SCANLINES", "FLAT ARCADE MONITOR · NO CURVATURE"),
         HLSL("hlsl", "HLSL CRT", "NTSC · CONVERGENCE · BLOOM · SCANLINES"),
-        NONE("default", "NO SHADER", "CLEAN FILTERED PIXELS"),
+        // Single point-sampled blit; "default" would route through a bilinear prescale target.
+        NONE("unfiltered", "NO SHADER", "RAW PIXELS · NO FILTERING"),
     }
 
     private companion object {

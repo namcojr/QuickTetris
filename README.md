@@ -12,9 +12,9 @@ It has no frontend, menus or ROM browser. Open the app and insert a coin.
   | Shader | Look |
   |---|---|
   | CRT-GEOM | Curved tube, scanlines, shadow mask |
-  | CRT-GEOM DELUXE | Halation, bloom, phosphor glow |
+  | Scanlines | Flat arcade monitor: scanlines only, no curvature or mask |
   | HLSL CRT | NTSC artifacts, convergence, bloom, scanlines |
-  | No shader | Clean filtered pixels |
+  | No shader | Raw nearest-neighbor pixels, no filtering |
 - **Aspect toggle:** long-press the game to switch between a mild vertical stretch that fills the screen and the true 4:3 image with black bars. The control panel stays the same size in both modes.
 - The app remembers your shader and aspect choice between launches.
 
@@ -37,7 +37,7 @@ Atari Tetris has no dedicated start input: the cabinet wires START and ROTATE to
 
 - Android 8.0+ (API 26), **arm64-v8a** only
 - An OpenGL ES device (bgfx runs with the `gles` backend, and only ESSL shaders are shipped)
-- Heavier shaders (CRT-GEOM DELUXE, HLSL) need a reasonably modern GPU.
+- The HLSL shader needs a reasonably modern GPU.
 
 ## Building
 

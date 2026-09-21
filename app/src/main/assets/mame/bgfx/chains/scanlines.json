@@ -1,0 +1,147 @@
+{
+	"name": "Flat Scanlines",
+	"author": "cgwg (crt-geom), flat preset for QuickTetris",
+	"sliders": [
+		{
+			"type": "float",
+			"name": "spot_size",
+			"text": "Spot size minimum",
+			"default": 0.3,
+			"max": 0.5,
+			"min": 0.1,
+			"step": 0.01,
+			"format": "%1.2f",
+			"screen": "raster"
+		},
+		{
+			"type": "float",
+			"name": "spot_growth",
+			"text": "Spot size dilation",
+			"default": 0.1,
+			"max": 0.4,
+			"min": 0.0,
+			"step": 0.01,
+			"format": "%1.2f",
+			"screen": "raster"
+		},
+		{
+			"type": "float",
+			"name": "spot_growth_power",
+			"text": "Spot dilation onset power",
+			"default": 3.0,
+			"max": 4.0,
+			"min": 0.2,
+			"step": 0.1,
+			"format": "%1.1f",
+			"screen": "raster"
+		},
+		{
+			"type": "intenum",
+			"name": "x_interpolation",
+			"text": "Horizontal interpolation",
+			"default": 2,
+			"max": 5,
+			"min": 0,
+			"step": 1,
+			"format": "%s",
+			"strings": [
+				"box",
+				"linear",
+				"Lanczos",
+				"Catmull-Rom",
+				"Mitchell-Netravali",
+				"B-spline"
+			],
+			"screen": "raster"
+		},
+		{
+			"type": "float",
+			"name": "CRTgamma",
+			"text": "Gamma of simulated CRT",
+			"default": 2.4,
+			"max": 4.0,
+			"min": 0.7,
+			"step": 0.05,
+			"format": "%1.2f",
+			"screen": "raster"
+		},
+		{
+			"type": "intenum",
+			"name": "monitorsRGB",
+			"text": "Gamma of output display",
+			"default": 1,
+			"max": 1,
+			"min": 0,
+			"step": 1,
+			"format": "%s",
+			"strings": [
+				"custom",
+				"sRGB"
+			],
+			"screen": "raster"
+		},
+		{
+			"type": "float",
+			"name": "monitorgamma",
+			"text": "Custom display gamma",
+			"default": 2.2,
+			"max": 4.0,
+			"min": 0.7,
+			"step": 0.05,
+			"format": "%1.2f",
+			"screen": "raster"
+		},
+		{
+			"type": "vec2",
+			"name": "aspect",
+			"text": "Aspect ratio ",
+			"default": [
+				1.0,
+				0.75
+			],
+			"max": [
+				1.0,
+				1.0
+			],
+			"min": [
+				0.3,
+				0.3
+			],
+			"step": 0.01,
+			"format": "%1.2f",
+			"screen": "raster"
+		}
+	],
+	"targets": [
+	],
+	"passes": [
+		{
+			"effect": "crt-geom/crt-geom",
+			"name": "Flat Scanlines",
+			"uniforms": [
+				{ "uniform": "aspect",                "slider": "aspect" },
+				{ "uniform": "CRTgamma",              "slider": "CRTgamma" },
+				{ "uniform": "monitorsRGB",           "slider": "monitorsRGB" },
+				{ "uniform": "monitorgamma",          "slider": "monitorgamma" },
+				{ "uniform": "spot_size",             "slider": "spot_size" },
+				{ "uniform": "spot_growth",           "slider": "spot_growth" },
+				{ "uniform": "spot_growth_power",     "slider": "spot_growth_power" },
+				{ "uniform": "u_interp",              "slider": "x_interpolation" },
+				{ "uniform": "curvature",             "value": [0.0, 0.0, 0.0, 0.0] },
+				{ "uniform": "R",                     "value": [3.5, 0.0, 0.0, 0.0] },
+				{ "uniform": "d",                     "value": [2.0, 0.0, 0.0, 0.0] },
+				{ "uniform": "angle",                 "value": [0.0, 0.0, 0.0, 0.0] },
+				{ "uniform": "cornersize",            "value": [0.0, 0.0, 0.0, 0.0] },
+				{ "uniform": "cornersmooth",          "value": [1000.0, 0.0, 0.0, 0.0] },
+				{ "uniform": "overscan",              "value": [1.0, 1.0, 0.0, 0.0] },
+				{ "uniform": "aperture_strength",     "value": [0.0, 0.0, 0.0, 0.0] },
+				{ "uniform": "aperture_brightboost",  "value": [0.0, 0.0, 0.0, 0.0] }
+			],
+			"input": [
+				{ "sampler": "mpass_texture", "target": "screen" },
+				{ "sampler": "mask_texture", "texture": "bgfx/chains/crt-geom/none.png" }
+			],
+			"output": "output"
+		}
+	]
+}
