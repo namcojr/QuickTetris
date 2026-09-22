@@ -826,6 +826,14 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         return mDispatchingKeyEvent;
     }
 
+    /**
+     * Gates the first start of the C app thread; subclasses returning false must call
+     * handleNativeState() on the UI thread once they return true.
+     */
+    protected boolean isNativeStartAllowed() {
+        return true;
+    }
+
     /* Transition to next state */
     public static void handleNativeState() {
 
@@ -857,6 +865,10 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         if (mNextNativeState == NativeState.RESUMED) {
             if (mSurface.mIsSurfaceReady && (mHasFocus || mHasMultiWindow) && mIsResumedCalled) {
                 if (mSDLThread == null) {
+                    // Held back: the subclass calls handleNativeState() again once it allows the start.
+                    if (mSingleton != null && !mSingleton.isNativeStartAllowed()) {
+                        return;
+                    }
                     // This is the entry point to the C app.
                     // Start up the C app thread and enable sensor input for the first time
                     // FIXME: Why aren't we enabling sensor input at start?

@@ -53,8 +53,8 @@ android {
         applicationId = "com.namco.quicktetris"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 120
+        versionName = "1.2.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -93,6 +93,16 @@ android {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
+    }
+}
+
+// APK named "QuickTetris v<versionName>.apk"; non-release types get a suffix so they can't be mistaken for it.
+@Suppress("DEPRECATION")
+android.applicationVariants.configureEach {
+    val suffix = if (buildType.name == "release") "" else "-${buildType.name}"
+    outputs.configureEach {
+        (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl).outputFileName =
+            "QuickTetris v$versionName$suffix.apk"
     }
 }
 
